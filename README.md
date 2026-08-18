@@ -50,9 +50,10 @@ time, and every `/admin/*` route re-checks that scope per request.
    can't revoke, and can't enumerate the share roster. Deleting a file
    takes its shares with it.
 6. **Persistence** — accounts and file metadata live in SQLite
-   (`server/drive.db`); the AES wrapping key is persisted to
-   `server/kms_wrapping_key.bin` (0600). Both survive a server restart, so
-   previously uploaded files still list and decrypt correctly afterward.
+   (`server/drive.db`); the AES wrapping key is held by the external KMS
+   (see "Key custody" below), outside the app tree. Both survive a server
+   restart, so previously uploaded files still list and decrypt correctly
+   afterward.
 
 ## Run it
 
@@ -105,9 +106,8 @@ server/
                          verification, FileVault (AES-256-GCM at rest)
   db.py                  SQLite persistence for accounts + file metadata
   promote_admin.py       grant/revoke admin on an account (operator-run, not an API)
-  drive.db               created on first run
-  kms_wrapping_key.bin   created on first run, 0600 -- POC stand-in for HSM custody
-  storage/<account>/     encrypted file blobs, one per upload
+  drive.db               created on first run (gitignored, not on GitHub)
+  storage/<account>/     encrypted file blobs, one per upload (gitignored)
   gen_cert.py            generates a plain self-signed TLS cert (alternative to mkcert)
   certs/                 cert.pem + key.pem the server presents over TLS
 client/
