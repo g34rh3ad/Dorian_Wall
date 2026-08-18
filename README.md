@@ -366,4 +366,39 @@ python3 test_security.py  # 26 assertions -- the 10 assessment findings stay clo
 These map directly to the design doc's phase-1 rollout scope (§08): hybrid
 handshake and signed tokens first, hardware QRNG and HSM custody are
 additive upgrades layered in later without changing the protocol.
-# quantum-auth-poc
+
+## Contributing
+
+This started as a proof of concept, built and tested in one long session
+rather than hardened over time — so contributions that close real gaps are
+welcome, especially the ones already named above (SQLAlchemy/Alembic
+migrations, WebAuthn-backed key storage, splitting the KMS into its own
+container, multi-stage Docker build to drop the compiler toolchain from
+the final image).
+
+Before opening a PR:
+
+1. Run the full test suite — it has to stay green:
+   ```bash
+   cd client
+   python3 test_auth.py && python3 test_e2e.py && \
+   python3 test_sharing.py && python3 test_security.py
+   ```
+2. If you touch the crypto (`server/pqc_utils.py`, `web/src/common.js`,
+   `client/e2e.py`), keep the JS and Python HKDF implementations in sync —
+   `client/e2e.py` exists specifically to exercise the same wire format the
+   browser produces. A mismatch there means passing tests with unopenable
+   files in production.
+3. CI (`.github/workflows/tests.yml`) runs all four suites on every push;
+   a PR that fails it won't merge.
+4. Explain the *why* behind security-relevant changes in the PR
+   description — the code itself is comment-free by design (stripped
+   intentionally), so that context has nowhere else to live.
+
+Bug reports and design-doc-scope questions are just as welcome as code —
+open an issue.
+
+## License
+
+MIT — see [LICENSE](LICENSE). Use it, fork it, ship it; no warranty, see
+the standard MIT disclaimer for what that means in practice.
