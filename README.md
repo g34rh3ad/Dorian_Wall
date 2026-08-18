@@ -366,3 +366,4 @@ python3 test_security.py  # 26 assertions -- the 10 assessment findings stay clo
 These map directly to the design doc's phase-1 rollout scope (§08): hybrid
 handshake and signed tokens first, hardware QRNG and HSM custody are
 additive upgrades layered in later without changing the protocol.
+# quantum-auth-poc
