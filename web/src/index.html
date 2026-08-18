@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>quantum-auth-drive-poc</title>
+<link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div class="meta">
+        <h1>quantum-auth-drive-poc</h1>
+        <span id="server-info">connecting&hellip;</span>
+      </div>
+      <p class="sub">Cloud storage gated by post-quantum authentication (ML-KEM-768 key exchange, ML-DSA-65 signatures). Files are encrypted end-to-end in your browser — the server stores ciphertext it cannot read.</p>
+      <nav class="top-nav">
+        <a href="./index.html" class="current">Home</a>
+        <a href="./register.html">Register</a>
+        <a href="./login.html">Sign in</a>
+      </nav>
+    </header>
+
+    <div class="tiles">
+      <div class="tile accent">
+        <div class="tile-label">Key exchange</div>
+        <div><span class="tile-value">ML-KEM</span><span class="tile-unit">768</span></div>
+        <div class="tile-sub">NIST FIPS 203</div>
+      </div>
+      <div class="tile accent">
+        <div class="tile-label">Signatures</div>
+        <div><span class="tile-value">ML-DSA</span><span class="tile-unit">65</span></div>
+        <div class="tile-sub">NIST FIPS 204</div>
+      </div>
+      <div class="tile">
+        <div class="tile-label">File encryption</div>
+        <div><span class="tile-value">AES</span><span class="tile-unit">256-GCM</span></div>
+        <div class="tile-sub">end-to-end, in your browser</div>
+      </div>
+      <div class="tile">
+        <div class="tile-label">Session token</div>
+        <div><span class="tile-value">10</span><span class="tile-unit">min</span></div>
+        <div class="tile-sub">re-checked every request</div>
+      </div>
+    </div>
+
+    <div class="landing-links">
+      <a href="./register.html">
+        <div class="link-title">Register &rarr;</div>
+        <div class="link-desc">New account. Generates an ML-DSA-65 identity keypair in the browser and enrolls the public key.</div>
+      </a>
+      <a href="./login.html">
+        <div class="link-title">Sign in &rarr;</div>
+        <div class="link-desc">Existing account. Reuses the keypair from registration on this device to prove identity via a fresh ML-KEM handshake.</div>
+      </a>
+    </div>
+
+    <footer>
+      <span>Same-origin fetch to the FastAPI server &middot; no CDN dependencies &middot; secret keys never leave this tab</span>
+    </footer>
+  </div>
+  <script type="module" src="./index-bundle.js"></script>
+</body>
+</html>

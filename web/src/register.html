@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>register &middot; quantum-auth-drive-poc</title>
+<link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div class="meta">
+        <h1>quantum-auth-drive-poc</h1>
+        <span id="server-info">connecting&hellip;</span>
+      </div>
+      <p class="sub">Create an account: a fresh ML-DSA-65 keypair is generated in this tab, the secret key is kept locally, and only the public key is sent to the server.</p>
+      <nav class="top-nav">
+        <a href="./index.html">Home</a>
+        <a href="./register.html" class="current">Register</a>
+        <a href="./login.html">Sign in</a>
+      </nav>
+    </header>
+
+    <div class="hint warn-box">The secret key is stored in this browser's localStorage, not synced anywhere. Registering on a different device or clearing site data means you'll need to register again under a new identity for this account name.</div>
+
+    <div class="controls">
+      <input id="account-id" type="text" placeholder="choose an account id" spellcheck="false" autocomplete="username" aria-label="Account ID" />
+      <input id="password" type="password" placeholder="password" autocomplete="new-password" aria-label="Password" />
+      <input id="password2" type="password" placeholder="confirm password" autocomplete="new-password" aria-label="Confirm password" />
+      <button id="register-btn">Create account</button>
+    </div>
+    <p class="hint" id="pw-hint">At least 10 characters. No composition rules &mdash; length beats symbols. Hashed with Argon2id server-side; never stored in this browser.</p>
+
+    <div class="grid">
+      <ol id="steps">
+        <li data-phase="keygen" data-order="1">Generate identity</li>
+        <li data-phase="enroll" data-order="2">Enroll public key</li>
+        <li data-phase="session" data-order="3">Sign in</li>
+      </ol>
+      <div id="log" aria-live="polite"></div>
+    </div>
+
+    <div id="result" class="panel">
+      <h2>Registered</h2>
+      <p class="sub">Account <code id="result-account"></code> is enrolled and signed in (scope: <code id="result-scope"></code>). <a href="./login.html">Go to sign in</a> next time, or <a href="./index.html">head to the drive</a> now.</p>
+    </div>
+
+    <footer>same-origin fetch to the FastAPI server · no CDN dependencies · secret key never leaves this browser</footer>
+  </div>
+  <script type="module" src="./register-bundle.js"></script>
+</body>
+</html>

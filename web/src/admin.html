@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>admin &middot; quantum-auth-drive-poc</title>
+<link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div class="meta">
+        <h1>quantum-auth-drive-poc</h1>
+        <span id="server-info">connecting&hellip;</span>
+      </div>
+      <p class="sub">Same sign-in as any account &mdash; the server only returns <code>admin</code> scope if this account was promoted with <code>promote_admin.py</code>, an operator-run script, not an API call.</p>
+      <nav class="top-nav">
+        <a href="./index.html">Home</a>
+        <a href="./register.html">Register</a>
+        <a href="./login.html">Sign in</a>
+        <a href="./admin.html" class="current">Admin</a>
+      </nav>
+    </header>
+
+    <div class="controls">
+      <input id="account-id" type="text" placeholder="account id" spellcheck="false" autocomplete="username" aria-label="Account ID" />
+      <input id="password" type="password" placeholder="password" autocomplete="current-password" aria-label="Password" />
+      <button id="login-btn">Sign in as admin</button>
+    </div>
+
+    <div class="grid">
+      <ol id="steps">
+        <li data-phase="identity" data-order="1">Load local identity</li>
+        <li data-phase="session" data-order="2">ML-KEM handshake</li>
+        <li data-phase="check" data-order="3">Check admin scope</li>
+      </ol>
+      <div id="log" aria-live="polite"></div>
+    </div>
+
+    <div id="denied-panel" class="panel denied">
+      <h2>Not an admin account</h2>
+      <p class="sub">This account signed in successfully but wasn't granted <code>admin</code> scope. Promote it from the server host: <code>python3 promote_admin.py &lt;account_id&gt;</code>, then sign in again &mdash; tokens are re-issued fresh on every login.</p>
+    </div>
+
+    <div id="dashboard" class="panel" style="background:transparent;border:none;box-shadow:none;padding:0">
+      <div class="tiles">
+        <div class="tile">
+          <div class="tile-label">Accounts</div>
+          <div><span class="tile-value" id="t-accounts">0</span></div>
+          <div class="tile-sub" id="t-accounts-sub">&nbsp;</div>
+        </div>
+        <div class="tile">
+          <div class="tile-label">Files stored</div>
+          <div><span class="tile-value" id="t-files">0</span></div>
+          <div class="tile-sub">encrypted at rest</div>
+        </div>
+        <div class="tile accent">
+          <div class="tile-label">Storage used</div>
+          <div><span class="tile-value" id="t-storage">0</span><span class="tile-unit" id="t-storage-unit">B</span></div>
+          <div class="tile-sub">AES-256-GCM, per-file key</div>
+        </div>
+        <div class="tile">
+          <div class="tile-label">Active sessions</div>
+          <div><span class="tile-value" id="t-sessions">0</span></div>
+          <div class="tile-sub">unexpired, unrevoked tokens</div>
+        </div>
+        <div class="tile">
+          <div class="tile-label">Active shares</div>
+          <div><span class="tile-value" id="t-shares">0</span></div>
+          <div class="tile-sub">cross-account grants</div>
+        </div>
+      </div>
+
+      <div class="dash-grid">
+        <div class="card">
+          <h2>Accounts</h2>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Account</th><th>Role</th><th>Enrolled</th><th class="num">Files</th><th class="num">Storage</th></tr></thead>
+              <tbody id="accounts-body"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>Storage by account</h2>
+          <div class="bars" id="storage-bars"></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>All files</h2>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Owner</th><th>Filename</th><th class="num">Size</th><th>Uploaded</th><th></th></tr></thead>
+            <tbody id="files-body"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <footer>
+      <span>Admin scope re-verified on every <code>/admin/*</code> request &middot; deleting a file removes it for its owner too</span>
+      <span id="clock"></span>
+    </footer>
+  </div>
+  <script type="module" src="./admin-bundle.js"></script>
+</body>
+</html>

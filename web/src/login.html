@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>sign in &middot; quantum-auth-drive-poc</title>
+<link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <div class="wrap" id="signin-view">
+    <header>
+      <div class="meta">
+        <h1>quantum-auth-drive-poc</h1>
+        <span id="server-info">connecting&hellip;</span>
+      </div>
+      <p class="sub">Sign in reuses the identity keypair generated at registration, on this device, and proves it with a fresh ML-KEM-768/ML-DSA-65 handshake &mdash; no password is ever sent.</p>
+      <nav class="top-nav">
+        <a href="./index.html">Home</a>
+        <a href="./register.html">Register</a>
+        <a href="./login.html" class="current">Sign in</a>
+      </nav>
+    </header>
+
+    <div class="controls">
+      <input id="account-id" type="text" placeholder="account id" spellcheck="false" autocomplete="username" aria-label="Account ID" />
+      <input id="password" type="password" placeholder="password" autocomplete="current-password" aria-label="Password" />
+      <button id="login-btn">Sign in</button>
+    </div>
+
+    <div class="grid">
+      <ol id="steps">
+        <li data-phase="identity" data-order="1">Load device key</li>
+        <li data-phase="session" data-order="2">Password + signature</li>
+        <li data-phase="access" data-order="3">Unlock drive</li>
+      </ol>
+      <div id="log" aria-live="polite"></div>
+    </div>
+  </div>
+
+  <div id="drive-view" hidden>
+    <div class="drive-shell">
+      <aside class="drive-side">
+        <div class="side-brand">
+          <span class="side-logo">Q</span>
+          <span class="side-title">Quantum Drive</span>
+        </div>
+
+        <div class="side-account">
+          <span class="avatar" id="avatar">?</span>
+          <div class="side-account-txt">
+            <div class="side-name" id="drive-account"></div>
+            <div class="side-role" id="drive-role">signed in</div>
+          </div>
+        </div>
+
+        <nav class="side-nav">
+          <button class="side-item active" data-view="mine">
+            <span class="side-ico">&#9633;</span> My Drive
+            <span class="side-count" id="count-mine">0</span>
+          </button>
+          <button class="side-item" data-view="shared">
+            <span class="side-ico">&#8644;</span> Shared with me
+            <span class="side-count" id="count-shared">0</span>
+          </button>
+        </nav>
+
+        <div class="side-storage">
+          <div class="side-storage-label">Storage used</div>
+          <div class="side-storage-val" id="storage-val">0 B</div>
+          <div class="bar-track"><span class="bar-fill" id="storage-bar" style="width:0%"></span></div>
+          <div class="side-storage-sub">AES-256-GCM at rest</div>
+        </div>
+
+        <div class="side-foot">
+          <button class="ghost-sm" id="signout-btn">Sign out</button>
+        </div>
+      </aside>
+
+      <main class="drive-main">
+        <div class="drive-top">
+          <div class="crumb"><span id="crumb-label">My Drive</span></div>
+          <div class="drive-actions">
+            <input id="file-input" type="file" hidden aria-label="Choose file to upload" />
+            <button id="upload-btn" class="tb primary">&#8593; Upload</button>
+            <button id="download-btn" class="tb" disabled>&#8595; Download</button>
+            <button id="share-btn" class="tb" disabled>&#8644; Share</button>
+            <button id="delete-btn" class="tb danger" disabled>&#128465; Delete</button>
+            <span class="tb-sep"></span>
+            <button id="refresh-btn" class="tb icon" title="Refresh">&#8635;</button>
+          </div>
+        </div>
+
+        <div id="share-panel" class="share-panel" hidden></div>
+
+        <div class="table-wrap drive-table-wrap">
+          <table class="drive-table">
+            <thead>
+              <tr>
+                <th class="c-check"><input type="checkbox" id="check-all" aria-label="Select all" /></th>
+                <th>File name</th>
+                <th class="c-owner" id="th-owner">Shared</th>
+                <th class="c-size num">Size</th>
+                <th class="c-date">Modified</th>
+              </tr>
+            </thead>
+            <tbody id="drive-body"></tbody>
+          </table>
+        </div>
+
+        <div class="drive-foot">
+          <span id="foot-count">0 items</span>
+          <span id="foot-sel"></span>
+        </div>
+
+        <details class="log-details">
+          <summary>Handshake log</summary>
+          <div id="log-slot"></div>
+        </details>
+      </main>
+    </div>
+  </div>
+
+  <script type="module" src="./login-bundle.js"></script>
+</body>
+</html>

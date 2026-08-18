@@ -1,0 +1,13 @@
+**/__pycache__
+**/*.pyc
+**/venv
+**/node_modules
+**/.env
+server/drive.db*
+server/storage
+server/certs
+web/dist
+*.log
+*.bak
+*.broken
+*.debug
