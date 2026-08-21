@@ -48,6 +48,7 @@ async def upload_file(
     wrapped_key_b64: str = Form(...),
     filename: str = Form(...),
     content_type: str = Form("application/octet-stream"),
+    folder_id: str | None = Form(None),
     authorization: str = Header(None),
 ):
     payload = require_token(request, authorization, "drive:write")
@@ -58,6 +59,11 @@ async def upload_file(
         wrapped = validation.decode_wrapped_key(wrapped_key_b64)
     except validation.ValidationError as e:
         raise HTTPException(400, str(e))
+
+    if folder_id is not None:
+        folder = db.get_folder(folder_id)
+        if folder is None or folder["owner"] != account_id:
+            raise HTTPException(404, "folder not found")
 
     contents = await file.read()
     if len(contents) > settings.max_upload_bytes:
@@ -70,30 +76,96 @@ async def upload_file(
     account_dir.mkdir(parents=True, exist_ok=True)
     (account_dir / f"{file_id}.enc").write_bytes(encrypted)
 
+    clean_name = validation.sanitize_filename(filename)
+    # A same-name upload into the same folder is a new VERSION of the
+    # existing file (its own file_id, own blob, own E2E key grant --
+    # sharing the encryption key across versions would let a later
+    # version silently decrypt with an old grant), not an overwrite.
+    existing = db.find_latest_version_in_folder(account_id, folder_id, clean_name)
+    group_id = existing["group_id"] if existing else file_id
+    version = (existing["version"] + 1) if existing else 1
+
     meta = {
         "file_id": file_id,
         "owner": account_id,
-        "filename": validation.sanitize_filename(filename),
+        "filename": clean_name,
         "content_type": content_type or "application/octet-stream",
         "size": len(contents),
         "created": int(time.time()),
+        "folder_id": folder_id,
+        "group_id": group_id,
+        "version": version,
     }
     db.insert_file(meta)
     db.put_file_key(file_id, account_id, kem_ct, wrapped)
     log_security_event("file_uploaded", account_id=account_id, file_id=file_id,
-                       size=len(contents), ip=client_ip(request))
+                       size=len(contents), version=version, ip=client_ip(request))
     return meta
 
 
 @router.get("/drive/files")
-def list_files(request: Request, authorization: str = Header(None)):
+def list_files(request: Request, folder_id: str | None = None, authorization: str = Header(None)):
     payload = require_token(request, authorization, "drive:read")
     account_id = payload["sub"]
-    files = db.list_files_for(account_id)
+    files = db.list_files_for(account_id, folder_id)
     counts = db.share_counts_for(account_id)
     for f in files:
         f["shared_with_count"] = counts.get(f["file_id"], 0)
-    return {"account_id": account_id, "files": files}
+    folders = db.list_folders_for(account_id, folder_id)
+    return {"account_id": account_id, "files": files, "folders": folders}
+
+
+@router.get("/drive/files/{file_id}/versions")
+def list_versions(file_id: str, request: Request, authorization: str = Header(None)):
+    payload = require_token(request, authorization, "drive:read")
+    account_id = payload["sub"]
+    meta = db.get_file(file_id)
+    if meta is None:
+        raise HTTPException(404, "file not found")
+    if meta["owner"] != account_id and not db.has_share(file_id, account_id):
+        raise HTTPException(403, "not your file")
+    return {"group_id": meta["group_id"], "versions": db.list_versions_for(meta["group_id"])}
+
+
+class FolderRequest(BaseModel):
+    name: str
+    parent_id: str | None = None
+
+
+@router.post("/drive/folders")
+def create_folder(req: FolderRequest, request: Request, authorization: str = Header(None)):
+    payload = require_token(request, authorization, "drive:write")
+    account_id = payload["sub"]
+
+    name = req.name.strip()
+    if not name or len(name) > 200:
+        raise HTTPException(400, "folder name must be 1-200 characters")
+
+    if req.parent_id is not None:
+        parent = db.get_folder(req.parent_id)
+        if parent is None or parent["owner"] != account_id:
+            raise HTTPException(404, "parent folder not found")
+
+    folder_id = str(uuid.uuid4())
+    db.create_folder(folder_id, account_id, name, req.parent_id)
+    return {"folder_id": folder_id, "name": name, "parent_id": req.parent_id}
+
+
+@router.delete("/drive/folders/{folder_id}")
+def delete_folder(folder_id: str, request: Request, authorization: str = Header(None)):
+    payload = require_token(request, authorization, "drive:write")
+    account_id = payload["sub"]
+
+    folder = db.get_folder(folder_id)
+    if folder is None:
+        raise HTTPException(404, "folder not found")
+    if folder["owner"] != account_id:
+        raise HTTPException(403, "only the owner can delete this folder")
+    if not db.folder_is_empty(folder_id):
+        raise HTTPException(409, "folder is not empty")
+
+    db.delete_folder(folder_id)
+    return {"status": "deleted", "folder_id": folder_id}
 
 
 @router.delete("/drive/files/{file_id}")

@@ -35,16 +35,32 @@ def init_db():
         """))
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_sessions_acct ON sessions(account_id)"))
         conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS folders (
+                folder_id  TEXT PRIMARY KEY,
+                owner      TEXT NOT NULL REFERENCES accounts(account_id),
+                name       TEXT NOT NULL,
+                parent_id  TEXT REFERENCES folders(folder_id) ON DELETE CASCADE,
+                created    BIGINT NOT NULL
+            )
+        """))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_folders_owner ON folders(owner)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_folders_parent ON folders(parent_id)"))
+        conn.execute(text("""
             CREATE TABLE IF NOT EXISTS files (
                 file_id       TEXT PRIMARY KEY,
                 owner         TEXT NOT NULL REFERENCES accounts(account_id),
                 filename      TEXT NOT NULL,
                 content_type  TEXT NOT NULL,
                 size          BIGINT NOT NULL,
-                created       BIGINT NOT NULL
+                created       BIGINT NOT NULL,
+                folder_id     TEXT REFERENCES folders(folder_id) ON DELETE SET NULL,
+                group_id      TEXT NOT NULL,
+                version       INTEGER NOT NULL DEFAULT 1
             )
         """))
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_files_owner ON files(owner)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_files_folder ON files(folder_id)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_files_group ON files(group_id)"))
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS shares (
                 file_id      TEXT NOT NULL REFERENCES files(file_id) ON DELETE CASCADE,
@@ -263,26 +279,64 @@ def list_accounts() -> list[dict]:
 
 
 def insert_file(meta: dict):
+    """meta must include group_id and version. A fresh upload sets
+    group_id = file_id (it is its own group of one); a new version of an
+    existing file reuses the original file's group_id and increments
+    version -- see find_latest_version_in_folder()."""
     with engine.begin() as conn:
         conn.execute(text("""
-            INSERT INTO files (file_id, owner, filename, content_type, size, created)
-            VALUES (:file_id, :owner, :filename, :content_type, :size, :created)
+            INSERT INTO files (file_id, owner, filename, content_type, size, created, folder_id, group_id, version)
+            VALUES (:file_id, :owner, :filename, :content_type, :size, :created, :folder_id, :group_id, :version)
         """), meta)
 
 
-def list_files_for(owner: str) -> list[dict]:
+def find_latest_version_in_folder(owner: str, folder_id: str | None, filename: str) -> dict | None:
+    """Looks for an existing file with the same name in the same folder,
+    to decide whether an upload is a new file or a new version of one."""
+    with engine.connect() as conn:
+        row = conn.execute(text("""
+            SELECT file_id, group_id, version FROM files
+            WHERE owner = :owner AND filename = :filename
+              AND ((folder_id IS NULL AND CAST(:folder_id AS TEXT) IS NULL) OR folder_id = CAST(:folder_id AS TEXT))
+            ORDER BY version DESC LIMIT 1
+        """), {"owner": owner, "filename": filename, "folder_id": folder_id}).mappings().fetchone()
+        return dict(row) if row else None
+
+
+def list_files_for(owner: str, folder_id: str | None = None) -> list[dict]:
+    """Only the latest version of each group -- older versions are reached
+    via list_versions_for(), not the main listing."""
     with engine.connect() as conn:
         rows = conn.execute(text("""
-            SELECT file_id, owner, filename, content_type, size, created
-            FROM files WHERE owner = :owner ORDER BY created DESC
-        """), {"owner": owner}).mappings().fetchall()
+            SELECT f.file_id, f.owner, f.filename, f.content_type, f.size, f.created,
+                   f.folder_id, f.group_id, f.version
+            FROM files f
+            INNER JOIN (
+                SELECT group_id, MAX(version) AS max_version FROM files
+                WHERE owner = :owner
+                  AND ((folder_id IS NULL AND CAST(:folder_id AS TEXT) IS NULL) OR folder_id = CAST(:folder_id AS TEXT))
+                GROUP BY group_id
+            ) latest ON latest.group_id = f.group_id AND latest.max_version = f.version
+            WHERE f.owner = :owner
+              AND ((f.folder_id IS NULL AND CAST(:folder_id AS TEXT) IS NULL) OR f.folder_id = CAST(:folder_id AS TEXT))
+            ORDER BY f.created DESC
+        """), {"owner": owner, "folder_id": folder_id}).mappings().fetchall()
+        return [dict(r) for r in rows]
+
+
+def list_versions_for(group_id: str) -> list[dict]:
+    with engine.connect() as conn:
+        rows = conn.execute(text("""
+            SELECT file_id, owner, filename, content_type, size, created, version
+            FROM files WHERE group_id = :group_id ORDER BY version DESC
+        """), {"group_id": group_id}).mappings().fetchall()
         return [dict(r) for r in rows]
 
 
 def get_file(file_id: str) -> dict | None:
     with engine.connect() as conn:
         row = conn.execute(text("""
-            SELECT file_id, owner, filename, content_type, size, created
+            SELECT file_id, owner, filename, content_type, size, created, folder_id, group_id, version
             FROM files WHERE file_id = :file_id
         """), {"file_id": file_id}).mappings().fetchone()
         return dict(row) if row else None
@@ -378,3 +432,50 @@ def share_counts_for(owner: str) -> dict[str, int]:
             GROUP BY s.file_id
         """), {"owner": owner}).mappings().fetchall()
         return {r["file_id"]: r["n"] for r in rows}
+
+
+def create_folder(folder_id: str, owner: str, name: str, parent_id: str | None):
+    with engine.begin() as conn:
+        conn.execute(text("""
+            INSERT INTO folders (folder_id, owner, name, parent_id, created)
+            VALUES (:folder_id, :owner, :name, :parent_id, :created)
+        """), {"folder_id": folder_id, "owner": owner, "name": name,
+               "parent_id": parent_id, "created": int(time.time())})
+
+
+def get_folder(folder_id: str) -> dict | None:
+    with engine.connect() as conn:
+        row = conn.execute(text(
+            "SELECT folder_id, owner, name, parent_id, created FROM folders WHERE folder_id = :folder_id"
+        ), {"folder_id": folder_id}).mappings().fetchone()
+        return dict(row) if row else None
+
+
+def list_folders_for(owner: str, parent_id: str | None) -> list[dict]:
+    with engine.connect() as conn:
+        rows = conn.execute(text("""
+            SELECT folder_id, owner, name, parent_id, created FROM folders
+            WHERE owner = :owner
+              AND ((parent_id IS NULL AND CAST(:parent_id AS TEXT) IS NULL) OR parent_id = CAST(:parent_id AS TEXT))
+            ORDER BY name
+        """), {"owner": owner, "parent_id": parent_id}).mappings().fetchall()
+        return [dict(r) for r in rows]
+
+
+def folder_is_empty(folder_id: str) -> bool:
+    with engine.connect() as conn:
+        has_children = conn.execute(text(
+            "SELECT 1 FROM folders WHERE parent_id = :folder_id LIMIT 1"
+        ), {"folder_id": folder_id}).fetchone()
+        has_files = conn.execute(text(
+            "SELECT 1 FROM files WHERE folder_id = :folder_id LIMIT 1"
+        ), {"folder_id": folder_id}).fetchone()
+        return has_children is None and has_files is None
+
+
+def delete_folder(folder_id: str) -> bool:
+    with engine.begin() as conn:
+        cur = conn.execute(text(
+            "DELETE FROM folders WHERE folder_id = :folder_id"
+        ), {"folder_id": folder_id})
+        return cur.rowcount > 0
