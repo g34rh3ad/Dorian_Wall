@@ -27,8 +27,8 @@ COPY server/*.py ./
 COPY server/routers ./routers
 COPY kms /app/kms
 COPY --from=web-builder /web/dist /app/web/dist
-COPY docker-entrypoint.sh /app/docker-entrypoint.sh
-RUN chmod +x /app/docker-entrypoint.sh
+COPY docker-entrypoint.sh docker-entrypoint-app.sh /app/
+RUN chmod +x /app/docker-entrypoint.sh /app/docker-entrypoint-app.sh
 
 RUN useradd --create-home --shell /usr/sbin/nologin qad && \
     mkdir -p /data/db /data/storage /data/kms /data/certs && \
@@ -37,7 +37,6 @@ USER qad
 
 ENV QAD_HOST=0.0.0.0 \
     QAD_PORT=8443 \
-    QAD_DB_PATH=/data/db/drive.db \
     QAD_STORAGE_DIR=/data/storage \
     QAD_STATIC_DIR=/app/web/dist \
     QAD_CERT_FILE=/data/certs/cert.pem \
@@ -49,4 +48,7 @@ ENV QAD_HOST=0.0.0.0 \
 EXPOSE 8443
 VOLUME ["/data"]
 
+# Standalone (single-container) mode by default -- runs its own KMS.
+# The distributed compose file overrides this to docker-entrypoint-app.sh,
+# which connects to a separate kms service instead.
 ENTRYPOINT ["/app/docker-entrypoint.sh"]

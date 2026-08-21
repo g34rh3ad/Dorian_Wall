@@ -1,17 +1,105 @@
 services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: qad
+      POSTGRES_PASSWORD: qad_dev_pw
+      POSTGRES_DB: quantum_auth
+    ports:
+      # Published for local test/debug/promote_admin.py convenience. In a
+      # real deployment this would NOT be exposed to the host -- only the
+      # app/kms containers on the compose network would reach it.
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - qad-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U qad -d quantum_auth"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # Deliberately a single instance, not scaled like `app`. This is a key
+  # custody service -- the equivalent of an HSM -- and real HSMs are
+  # typically active/passive or their own dedicated cluster technology,
+  # not naively load-balanced the way stateless app servers are. Scaling
+  # it here would mean N independent master keys, which breaks every
+  # already-encrypted file the moment a request lands on a different one.
+  kms:
+    build:
+      context: .
+      dockerfile: kms/Dockerfile
+    volumes:
+      - qad-kms-keydata:/data/kms
+      - qad-kms-socket:/run/kms
+    healthcheck:
+      test: ["CMD", "test", "-S", "/run/kms/kms.sock"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # One-shot: generates the TLS cert once into a volume every app replica
+  # shares, then exits. Runs before any app replica starts.
+  cert-init:
+    build: .
+    entrypoint: ["sh", "-c", "cd /app/server && python3 gen_cert.py"]
+    environment:
+      QAD_CERT_FILE: /data/certs/cert.pem
+      QAD_KEY_FILE: /data/certs/key.pem
+    volumes:
+      - qad-certs:/data/certs
+
   app:
     build: .
-    ports:
-      - "8443:8443"
+    entrypoint: ["/app/docker-entrypoint-app.sh"]
+    environment:
+      QAD_HOST: 0.0.0.0
+      QAD_PORT: 8443
+      QAD_DATABASE_URL: postgresql+psycopg://qad:qad_dev_pw@postgres:5432/quantum_auth
+      QAD_REDIS_URL: redis://redis:6379/0
+      QAD_KMS_SOCKET: /run/kms/kms.sock
+      QAD_STORAGE_DIR: /data/storage
+      QAD_STATIC_DIR: /app/web/dist
+      QAD_CERT_FILE: /data/certs/cert.pem
+      QAD_KEY_FILE: /data/certs/key.pem
+      QAD_LOG_JSON: "true"
     volumes:
-      - qad-data:/data
-    restart: unless-stopped
+      - qad-storage:/data/storage
+      - qad-certs:/data/certs:ro
+      - qad-kms-socket:/run/kms
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      kms: {condition: service_healthy}
+      cert-init: {condition: service_completed_successfully}
+    deploy:
+      replicas: 2
     healthcheck:
       test: ["CMD", "python3", "-c", "import socket,ssl; ctx=ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT); ctx.check_hostname=False; ctx.verify_mode=ssl.CERT_NONE; s=ctx.wrap_socket(socket.create_connection(('127.0.0.1',8443),3)); s.close()"]
-      interval: 30s
+      interval: 15s
       timeout: 5s
-      retries: 3
-      start_period: 40s
+      retries: 5
+      start_period: 30s
+
+  nginx:
+    image: nginx:alpine
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    ports:
+      - "8443:8443"
+    depends_on:
+      - app
 
 volumes:
-  qad-data:
+  qad-postgres-data:
+  qad-kms-keydata:
+  qad-kms-socket:
+  qad-certs:
+  qad-storage:

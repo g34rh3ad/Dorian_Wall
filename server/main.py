@@ -5,6 +5,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
 import db
+import session_store
 from config import settings
 from kms_client import KMSClient, KMSUnavailable
 from logging_config import RequestIDMiddleware, setup_logging
@@ -34,7 +35,12 @@ async def lifespan(app: FastAPI):
     except KMSUnavailable as e:
         raise SystemExit(f"cannot start: {e}")
 
-    app.state.pending_sessions = {}
+    # Fail closed, same as the KMS check above: a silent fallback to
+    # per-process state would quietly break multi-replica handshakes
+    # instead of refusing to start.
+    if not session_store.ping():
+        raise SystemExit(f"cannot start: Redis unreachable at {settings.redis_url}")
+
     app.state.init_limiter = RateLimiter(limit=settings.rate_limit_init_per_min, window_seconds=60)
     app.state.register_limiter = RateLimiter(limit=settings.rate_limit_register_per_min, window_seconds=60)
     app.state.login_limiter = RateLimiter(limit=settings.rate_limit_login_per_min, window_seconds=60)

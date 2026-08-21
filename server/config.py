@@ -11,7 +11,9 @@ class Settings(BaseSettings):
     cert_file: Path = Path("certs/cert.pem")
     key_file: Path = Path("certs/key.pem")
 
-    db_path: Path = Path("./drive.db")
+    db_path: Path = Path("./drive.db")  # legacy sqlite path, unused once database_url is set
+    database_url: str = "postgresql+psycopg://qad:qad_dev_pw@127.0.0.1:5432/quantum_auth"
+    redis_url: str = "redis://127.0.0.1:6379/0"
     storage_dir: Path = Path("./storage")
     static_dir: Path = Path("../web/dist")
 
@@ -20,7 +22,6 @@ class Settings(BaseSettings):
     max_upload_mb: int = 25
     token_ttl_seconds: int = 600
     handshake_ttl_seconds: int = 30
-    max_pending_sessions: int = 5000
 
     rate_limit_init_per_min: int = 120
     rate_limit_register_per_min: int = 20

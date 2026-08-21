@@ -1,13 +1,14 @@
 
 import base64
 import secrets
-import sqlite3
 import subprocess
 import sys
 from pathlib import Path
 
 import httpx
 import oqs
+import sqlalchemy
+from sqlalchemy import text
 
 import e2e
 
@@ -15,7 +16,7 @@ KEM_ALG, SIG_ALG = "ML-KEM-768", "ML-DSA-65"
 BASE = "https://127.0.0.1:8443"
 SERVER_DIR = Path(__file__).parent.parent / "server"
 CERT = SERVER_DIR / "certs" / "cert.pem"
-DB = SERVER_DIR / "drive.db"
+DATABASE_URL = "postgresql+psycopg://qad:qad_dev_pw@127.0.0.1:5432/quantum_auth"
 
 RUN = secrets.token_hex(3)
 PW = "correct-horse-battery-2026"
@@ -34,6 +35,34 @@ def check(label, cond, detail=""):
 
 
 b64, unb64 = e2e.b64, e2e.unb64
+
+
+def read_storage_blob(owner: str, file_id: str) -> bytes | None:
+    """Reads the raw encrypted blob directly, bypassing the API entirely --
+    that's the point: we're checking what's actually on disk, not trusting
+    what the server chooses to tell us. Works against a local dev server
+    (host filesystem) or the distributed Docker deployment (blob lives
+    inside a container's volume, fetched via `docker exec`)."""
+    host_path = SERVER_DIR / "storage" / owner / f"{file_id}.enc"
+    if host_path.exists():
+        return host_path.read_bytes()
+
+    import os
+    env = {**os.environ, "DOCKER_HOST": os.environ.get("DOCKER_HOST", "unix:///var/run/docker.sock")}
+    try:
+        names = subprocess.run(
+            ["docker", "ps", "--filter", "name=-app-", "--format", "{{.Names}}"],
+            capture_output=True, text=True, timeout=10, env=env,
+        ).stdout.split()
+    except Exception:
+        return None
+    if not names:
+        return None
+    r = subprocess.run(
+        ["docker", "exec", names[0], "cat", f"/data/storage/{owner}/{file_id}.enc"],
+        capture_output=True, timeout=10, env=env,
+    )
+    return r.stdout if r.returncode == 0 else None
 
 
 class Account:
@@ -126,22 +155,28 @@ def main():
     check("owner can decrypt their own file", alice.download(meta["file_id"]) == SECRET)
 
     print("\nthe server cannot read it:")
-    blob_path = SERVER_DIR / "storage" / alice.id / f"{meta['file_id']}.enc"
-    on_disk = blob_path.read_bytes()
-    check("plaintext is NOT on disk", SECRET not in on_disk)
-    check("no recognisable words on disk", b"BOARD" not in on_disk and b"minutes" not in on_disk)
+    on_disk = read_storage_blob(alice.id, meta["file_id"])
+    check("blob found on disk (local or containerized)", on_disk is not None)
+    check("plaintext is NOT on disk", on_disk is not None and SECRET not in on_disk)
+    check("no recognisable words on disk",
+          on_disk is not None and b"BOARD" not in on_disk and b"minutes" not in on_disk)
 
     raw = c.get(f"/drive/files/{meta['file_id']}", headers=alice.headers).content
     check("what the server serves is ciphertext, not plaintext", SECRET not in raw)
     check("ciphertext is longer than plaintext (nonce+tag)", len(raw) > len(SECRET))
 
-    conn = sqlite3.connect(DB)
-    row = conn.execute("SELECT wrapped_key FROM file_keys WHERE file_id=?", (meta["file_id"],)).fetchone()
-    check("the DB stores only a WRAPPED key", row is not None and len(bytes(row[0])) == 60)
-    cols = [r[1] for r in conn.execute("PRAGMA table_info(accounts)")]
-    check("DB has no column holding any user's KEM secret key",
-          not any("secret" in col.lower() for col in cols), str(cols))
-    conn.close()
+    engine = sqlalchemy.create_engine(DATABASE_URL)
+    with engine.connect() as dbconn:
+        row = dbconn.execute(text(
+            "SELECT wrapped_key FROM file_keys WHERE file_id = :fid"
+        ), {"fid": meta["file_id"]}).fetchone()
+        check("the DB stores only a WRAPPED key", row is not None and len(bytes(row[0])) == 60)
+        cols = [r[0] for r in dbconn.execute(text(
+            "SELECT column_name FROM information_schema.columns WHERE table_name = 'accounts'"
+        ))]
+        check("DB has no column holding any user's KEM secret key",
+              not any("secret" in col.lower() for col in cols), str(cols))
+    engine.dispose()
 
     print("\nsharing is cryptographic:")
     check("mallory cannot fetch a key grant she has none of",
@@ -182,9 +217,41 @@ def main():
     print("\nKMS custody:")
     check("no key material left in server/",
           not list(SERVER_DIR.glob("*.bin")) and not list(SERVER_DIR.glob("*wrapping*")))
-    kms_home = Path.home() / ".local/share/quantum-auth-kms"
-    check("master key lives outside the app tree", (kms_home / "master.key").exists())
-    check("...and is not inside server/", SERVER_DIR not in (kms_home / "master.key").parents)
+
+    import os
+    env = {**os.environ, "DOCKER_HOST": os.environ.get("DOCKER_HOST", "unix:///var/run/docker.sock")}
+    app_names = subprocess.run(
+        ["docker", "ps", "--filter", "name=-app-", "--format", "{{.Names}}"],
+        capture_output=True, text=True, timeout=10, env=env,
+    ).stdout.split()
+
+    if app_names:
+        # Distributed mode: the KMS master key must exist in the kms
+        # container's own volume, and be UNREACHABLE from an app
+        # replica's filesystem -- app and kms share only the unix socket
+        # directory, not the key material itself.
+        kms_names = subprocess.run(
+            ["docker", "ps", "--filter", "name=-kms-", "--format", "{{.Names}}"],
+            capture_output=True, text=True, timeout=10, env=env,
+        ).stdout.split()
+        check("kms container is running", bool(kms_names))
+        if kms_names:
+            r = subprocess.run(
+                ["docker", "exec", kms_names[0], "test", "-f", "/data/kms/master.key"],
+                env=env,
+            )
+            check("master key exists inside the kms container", r.returncode == 0)
+        r = subprocess.run(
+            ["docker", "exec", app_names[0], "sh", "-c",
+             "find / -xdev -name 'master.key' 2>/dev/null"],
+            capture_output=True, text=True, timeout=10, env=env,
+        )
+        check("master key is NOT reachable from an app replica's filesystem",
+              r.stdout.strip() == "", f"found: {r.stdout!r}")
+    else:
+        kms_home = Path.home() / ".local/share/quantum-auth-kms"
+        check("master key lives outside the app tree", (kms_home / "master.key").exists())
+        check("...and is not inside server/", SERVER_DIR not in (kms_home / "master.key").parents)
 
     print(f"\n{passed} passed, {failed} failed")
     return 1 if failed else 0

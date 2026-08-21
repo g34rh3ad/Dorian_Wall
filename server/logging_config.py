@@ -1,11 +1,14 @@
 import json
 import logging
+import socket
 import sys
 import time
 import uuid
 from contextvars import ContextVar
 
 from starlette.middleware.base import BaseHTTPMiddleware
+
+_HOSTNAME = socket.gethostname()
 
 request_id_var: ContextVar[str] = ContextVar("request_id", default="-")
 
@@ -60,6 +63,11 @@ class RequestIDMiddleware(BaseHTTPMiddleware):
         finally:
             request_id_var.reset(token)
         response.headers["X-Request-ID"] = rid
+        # Container hostname, not sensitive -- exists so a horizontally
+        # scaled deployment is *observable*, not just architecturally
+        # claimed: `curl` a few times and watch the value rotate across
+        # replicas as nginx re-resolves Docker's DNS per connection.
+        response.headers["X-Served-By"] = _HOSTNAME
         return response
 
 

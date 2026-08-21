@@ -9,6 +9,7 @@ from pydantic import BaseModel
 
 import db
 import passwords
+import session_store
 import validation
 from config import settings
 from deps import require_token
@@ -35,13 +36,6 @@ class SessionAuthRequest(BaseModel):
     session_id: str
     password: str
     signature_b64: str
-
-
-def sweep_pending_sessions(pending_sessions: dict) -> None:
-    cutoff = time.time() - settings.handshake_ttl_seconds
-    stale = [sid for sid, s in pending_sessions.items() if s["created"] < cutoff]
-    for sid in stale:
-        pending_sessions.pop(sid, None)
 
 
 @router.post("/register")
@@ -87,22 +81,15 @@ def session_init(req: SessionInitRequest, request: Request):
             "Retry-After": str(request.app.state.init_limiter.retry_after(ip))
         })
 
-    pending_sessions = request.app.state.pending_sessions
-    sweep_pending_sessions(pending_sessions)
-    if len(pending_sessions) >= settings.max_pending_sessions:
-        raise HTTPException(503, "server busy, retry shortly")
-
     kem = oqs.KeyEncapsulation(KEM_ALG)
     ciphertext, shared_secret = kem.encap_secret(unb64(req.kem_public_key_b64))
 
     session_id = str(uuid.uuid4())
     challenge = secrets.token_bytes(32)
-    pending_sessions[session_id] = {
-        "account_id": req.account_id,
-        "shared_secret": shared_secret,
-        "challenge": challenge,
-        "created": time.time(),
-    }
+    # TTL enforced by Redis itself (SETEX) -- no periodic sweep needed, and
+    # the state is visible to every app replica, not pinned to whichever
+    # one handled this request.
+    session_store.put(session_id, req.account_id, shared_secret, challenge, settings.handshake_ttl_seconds)
 
     return {
         "session_id": session_id,
@@ -120,12 +107,12 @@ def session_auth(req: SessionAuthRequest, request: Request):
             "Retry-After": str(request.app.state.login_limiter.retry_after(ip))
         })
 
-    pending_sessions = request.app.state.pending_sessions
-    session = pending_sessions.pop(req.session_id, None)
+    session = session_store.pop(req.session_id)
     if session is None:
+        # Covers both "never existed" and "Redis TTL already expired it" --
+        # from the caller's point of view those are indistinguishable and
+        # don't need to be.
         raise HTTPException(404, "unknown or expired session")
-    if time.time() - session["created"] > settings.handshake_ttl_seconds:
-        raise HTTPException(408, "handshake timed out")
 
     account_id = session["account_id"]
     account = db.get_account(account_id)
