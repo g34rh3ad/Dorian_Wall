@@ -11,6 +11,20 @@ simulated piece is the QRNG entropy source
 (`server/pqc_utils.py::simulated_qrng_bytes`), clearly labeled and swappable
 for a hardware feed later.
 
+Runs as a real distributed deployment (Postgres, Redis, 2+ stateless app
+replicas behind nginx, a separate single-instance KMS) — see
+`docker-compose.yml` and `docs/`:
+
+- [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md) — adversary model, what's
+  defended and what's explicitly not, each claim tied to a test
+- [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md) — ML-KEM/ML-DSA vs. classical
+  crypto, measured on this project's own build, not cited from elsewhere
+- [`docs/RELATED_WORK.md`](docs/RELATED_WORK.md) — positioned against
+  Proton Drive/Tresorit's E2E pattern and existing PQC-TLS deployments
+
+Drive features: nested folders, and file versioning where each version
+gets its own independent E2E encryption key (`client/test_folders_versions.py`).
+
 ## Pages
 
 | Page | What it does |
