@@ -72,7 +72,7 @@ time, and every `/admin/*` route re-checks that scope per request.
 ## Run it
 
 ```bash
-cd quantum-auth-poc
+cd Dorian_Wall
 source venv/bin/activate
 cd server
 uvicorn main:app --host 127.0.0.1 --port 8443 --ssl-certfile certs/cert.pem --ssl-keyfile certs/key.pem
