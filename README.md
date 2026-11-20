@@ -1,4 +1,4 @@
-# quantum-auth-drive-poc
+# The Dorian Wall
 
 Local proof of concept for the design in *Quantum-Resistant Authentication for
 Footage & Data Storage*: a Drive-like cloud storage service where sign-in and
